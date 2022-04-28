@@ -10,12 +10,36 @@ variable:
     value: ""
 notifier:
   - type: html
+  - type: console
+
+transformer:
+  - type: qemu_installer
+    connection:
+      address: $(address)
+      username: $(username)
+      private_key_file: $(admin_private_key_file)
+    installer:
+      type: qemu_package
+  - type: libvirt_installer
+    connection:
+      address: $(address)
+      username: $(username)
+      private_key_file: $(admin_private_key_file)
+    installer:
+      type: libvirt_package
+
 platform:
   - type: qemu
     admin_private_key_file: $(admin_private_key_file)
     keep_environment: $(keep_environment)
+    qemu:
+      hosts:
+        - address: $(address)
+          username: $(username)
+          private_key_file: $(admin_private_key_file)
     requirement:
       qemu:
-        qcow2: $(qcow2)
+        disk_img: $(qcow2)
+        disk_img_format: "qcow2"
         cloud_init:
           extra_user_data: $(extra_user_data)
