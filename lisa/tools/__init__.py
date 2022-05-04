@@ -63,6 +63,7 @@ from .powershell import PowerShell
 from .python import Pip, Python
 from .qemu import Qemu
 from .qemu_img import QemuImg
+from .rc_local import RcLocal
 from .reboot import Reboot
 from .rm import Rm
 from .sar import Sar
@@ -155,6 +156,7 @@ __all__ = [
     "Python",
     "Qemu",
     "QemuImg",
+    "RcLocal",
     "Reboot",
     "Rpm",
     "Rm",
