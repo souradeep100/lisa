@@ -8,6 +8,7 @@ from assertpy import assert_that
 
 from lisa.executable import Tool
 from lisa.tools import Cat
+from lisa.tools.rc_local import RcLocal
 from lisa.tools.whoami import Whoami
 from lisa.util import LisaException
 
@@ -73,6 +74,13 @@ class Ip(Tool):
                 f"fail to restart [down then up] the nic {nic_name}"
             ),
         )
+
+    def setup_nic_at_boot(self, ip: str, nic_name: str) -> None:
+        rc_local = self.node.tools[RcLocal]
+        rc_local.add_command(f"ip addr add {ip} dev {nic_name}")
+        rc_local.add_command(f"ip link set dev {nic_name} up")
+
+        self.node.reboot()
 
     def get_mtu(self, nic_name: str) -> int:
         cat = self.node.tools[Cat]

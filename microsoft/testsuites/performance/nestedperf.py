@@ -223,10 +223,10 @@ class KVMPerformance(TestSuite):  # noqa
                 name="server",
                 log=log,
             )
-            server.tools[Ip].add_ipv4_address(
-                self._NIC_NAME, f"{self._SERVER_IP_ADDR}/24"
+
+            server.tools[Ip].setup_nic_at_boot(
+                f"{self._SERVER_IP_ADDR}/{self._BR_CIDR}", self._NIC_NAME
             )
-            server.tools[Ip].up(self._NIC_NAME)
             server.internal_address = self._SERVER_IP_ADDR
             server.nics.default_nic = self._NIC_NAME
             server.capability.network_interface = Synthetic()
@@ -245,10 +245,9 @@ class KVMPerformance(TestSuite):  # noqa
                 stop_existing_vm=False,
                 log=log,
             )
-            client.tools[Ip].add_ipv4_address(
-                self._NIC_NAME, f"{self._CLIENT_IP_ADDR}/24"
+            client.tools[Ip].setup_nic_at_boot(
+                f"{self._CLIENT_IP_ADDR}/{self._BR_CIDR}", self._NIC_NAME
             )
-            client.tools[Ip].up(self._NIC_NAME)
             client.nics.default_nic = self._NIC_NAME
             client.capability.network_interface = Synthetic()
 
@@ -258,10 +257,11 @@ class KVMPerformance(TestSuite):  # noqa
             )
         finally:
             # stop running QEMU instances
-            node.tools[Qemu].delete_vm()
+            # node.tools[Qemu].delete_vm()
 
             # clear bridge and taps
-            node.tools[Ip].delete_interface(self._BR_NAME)
+            # node.tools[Ip].delete_interface(self._BR_NAME)
+            pass
 
     @TestCaseMetadata(
         description="""
