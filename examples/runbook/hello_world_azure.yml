@@ -1,14 +1,53 @@
 name: remote try
 extension:
-  - "../testsuites"
-platform:
-  - type: azure
-    admin_private_key_file: $(admin_private_key_file)
-    azure:
-      service_principal_tenant_id: $(service_principal_tenant_id)
-      service_principal_client_id: $(service_principal_client_id)
-      service_principal_key: $(service_principal_key)
-      subscription_id: $(subscription_id)
+  - "../../microsoft/testsuites/performance"
 testcase:
   - criteria:
-      area: demo
+      name: test_mariner_docker
+variable:
+  - name: location
+    value: "westus2"
+  - name: keep_environment
+    value: "no"
+  - name: resource_group_name
+    value: ""
+  - name: marketplace_image
+    value: "MicrosoftCBLMariner:cbl-mariner:cbl-mariner-2:latest"
+  - name: vhd
+    value: ""
+  - name: vm_size
+    value: Standard_DS3_v2
+  - name: deploy
+    value: true
+  - name: wait_delete
+    value: false
+  - name: concurrency
+    value: 5
+  - name: admin_private_key_file
+    value: ""
+    is_secret: true
+  - name: admin_password
+    value: ""
+    is_secret: true
+concurrency: $(concurrency)
+notifier:
+  - type: html
+  - type: env_stats
+platform:
+  - type: azure
+#    admin_private_key_file: $(admin_private_key_file)
+    admin_password: "Password@1234"
+    keep_environment: $(keep_environment)
+    azure:
+      resource_group_name: $(resource_group_name)
+      deploy: $(deploy)
+      subscription_id: $(subscription_id)
+      wait_delete: $(wait_delete)
+    requirement:
+      core_count:
+        min: 2
+      azure:
+        marketplace: $(marketplace_image)
+        vhd: $(vhd)
+        location: $(location)
+        vm_size: $(vm_size)
