@@ -260,7 +260,13 @@ function Install_Dpdk () {
 			ssh ${1} "sudo zypper install -y python3-pip && sudo pip3 install --upgrade pip && sudo pip3 install pyelftools"
 			# default meson in SUSE 15-SP1 is 0.46 & required is 0.47. Installing it separately
 			ssh "${1}" ". utils.sh && install_package ninja"
-			ssh "${1}" "rpm -ivh https://download.opensuse.org/repositories/openSUSE:/Leap:/15.2/standard/noarch/meson-0.54.2-lp152.1.1.noarch.rpm"
+			if [[ ${DISTRO_VERSION} == "15.4" ]] || [[ ${DISTRO_VERSION} == "15.4" ]]; then
+				ssh "${1}" "zypper addrepo https://download.opensuse.org/repositories/devel:tools:building/${DISTRO_VERSION}/devel:tools:building.repo"
+				ssh "${1}" "zypper --no-gpg-checks refresh"
+				ssh "${1}" ". utils.sh && install_package meson"
+			else
+				ssh "${1}" "rpm -ivh https://download.opensuse.org/repositories/openSUSE:/Leap:/15.2/standard/noarch/meson-0.54.2-lp152.1.1.noarch.rpm"
+			fi
 			;;
 		mariner)
 			ssh "${1}" "yum install -y diffutils gcc kernel-headers binutils glibc-devel zlib-devel linux-devel libnuma libnuma-devel numactl meson"
