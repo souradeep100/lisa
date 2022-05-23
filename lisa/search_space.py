@@ -1,8 +1,10 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 
+import copy
 import sys
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Iterable, List, Optional, Set, Type, TypeVar, Union
 
 from dataclasses_json import dataclass_json
@@ -10,6 +12,11 @@ from dataclasses_json import dataclass_json
 from lisa.util import LisaException, NotMeetRequirementException
 
 T = TypeVar("T")
+
+
+class RequirementMethod(str, Enum):
+    generate_min_capability: str = "generate_min_capability"
+    intersect: str = "intersect"
 
 
 @dataclass
@@ -51,17 +58,35 @@ class RequirementMixin:
     def check(self, capability: Any) -> ResultReason:
         raise NotImplementedError()
 
-    def _generate_min_capability(self, capability: Any) -> Any:
-        raise NotImplementedError()
-
     def generate_min_capability(self, capability: Any) -> Any:
+        self._validate_result(capability)
+        return self._generate_min_capability(capability)
+
+    def intersect(self, capability: Any) -> Any:
+        self._validate_result(capability)
+        return self._intersect(capability)
+
+    def _call_requirement_method(self, method_name: str, capability: Any) -> Any:
+        raise NotImplementedError(method_name)
+
+    def _generate_min_capability(self, capability: Any) -> Any:
+        return self._call_requirement_method(
+            method_name=RequirementMethod.generate_min_capability,
+            capability=capability,
+        )
+
+    def _intersect(self, capability: Any) -> Any:
+        return self._call_requirement_method(
+            method_name=RequirementMethod.intersect, capability=capability
+        )
+
+    def _validate_result(self, capability: Any) -> None:
         check_result = self.check(capability)
         if not check_result.result:
             raise NotMeetRequirementException(
                 "cannot get min value, capability doesn't support requirement:"
                 f"{check_result.reasons}"
             )
-        return self._generate_min_capability(capability)
 
 
 T_SEARCH_SPACE = TypeVar("T_SEARCH_SPACE", bound=RequirementMixin)
@@ -90,6 +115,14 @@ class IntRange(RequirementMixin):
         if max_value:
             max_inclusive = "(inc)" if self.max_inclusive else "(exc)"
         return f"[{self.min},{max_value}{max_inclusive}]"
+
+    def __eq__(self, __o: object) -> bool:
+        assert isinstance(__o, IntRange), f"actual type: {type(__o)}"
+        return (
+            self.min == __o.min
+            and self.max == __o.max
+            and self.max_inclusive == __o.max_inclusive
+        )
 
     def check(self, capability: Any) -> ResultReason:
         result = ResultReason()
@@ -164,6 +197,26 @@ class IntRange(RequirementMixin):
                     temp_min = self.generate_min_capability(cap_item)
                     result = min(temp_min, result)
 
+        return result
+
+    def _intersect(self, capability: Any) -> Any:
+        if isinstance(capability, int):
+            return capability
+        elif isinstance(capability, IntRange):
+            result = IntRange(
+                min=self.min, max=self.max, max_inclusive=self.max_inclusive
+            )
+            if self.min < capability.min:
+                result.min = capability.min
+            if self.max > capability.max:
+                result.max = capability.max
+                result.max_inclusive = capability.max_inclusive
+            elif self.max == capability.max:
+                result.max_inclusive = capability.max_inclusive and self.max_inclusive
+        else:
+            raise NotImplementedError(
+                f"IntRange doesn't support other intersect on {type(capability)}."
+            )
         return result
 
 
@@ -266,13 +319,6 @@ class SetSpace(RequirementMixin, Set[T]):
                     result.add_reason(f"requirements excludes {names}")
         return result
 
-    def _generate_min_capability(self, capability: Any) -> Optional[Set[T]]:
-        result = None
-        if self.is_allow_set and len(self) > 0:
-            result = self
-
-        return result
-
     def add(self, element: T) -> None:
         super().add(element)
         self.items.append(element)
@@ -280,6 +326,21 @@ class SetSpace(RequirementMixin, Set[T]):
     def update(self, *s: Iterable[T]) -> None:
         super().update(*s)
         self.items.extend(*s)
+
+    def _generate_min_capability(self, capability: Any) -> Optional[Set[T]]:
+        result: Optional[SetSpace[T]] = None
+        if self.is_allow_set and len(self) > 0:
+            assert isinstance(capability, SetSpace), f"actual: {type(capability)}"
+            result = SetSpace(is_allow_set=self.is_allow_set)
+            if len(capability) > 0:
+                for item in self:
+                    if item in capability:
+                        result.add(item)
+
+        return result
+
+    def _intersect(self, capability: Any) -> Any:
+        return self._generate_min_capability(capability)
 
 
 def decode_set_space(data: Any) -> Any:
@@ -309,6 +370,8 @@ def decode_set_space_by_type(
         decoded_data = new_data
     elif isinstance(data, str):
         decoded_data = base_type(data)  # type: ignore
+    elif isinstance(data, SetSpace):
+        decoded_data = data
     else:
         raise LisaException(f"unknown data type: {type(data)}")
     return decoded_data
@@ -394,6 +457,26 @@ def generate_min_capability_countspace(
     return result
 
 
+def intersect_countspace(requirement: CountSpace, capability: CountSpace) -> Any:
+    check_result = check_countspace(requirement, capability)
+    if not check_result.result:
+        raise NotMeetRequirementException(
+            "cannot get intersect, capability doesn't support requirement"
+        )
+    if requirement is None and capability:
+        return copy.copy(capability)
+    if isinstance(requirement, int):
+        result = requirement
+    elif isinstance(requirement, IntRange):
+        result = requirement.intersect(capability)
+    else:
+        raise LisaException(
+            f"not support to get intersect on countspace type: {type(requirement)}"
+        )
+
+    return result
+
+
 def check_setspace(
     requirement: Optional[Union[SetSpace[T], T]],
     capability: Optional[Union[SetSpace[T], T]],
@@ -421,7 +504,7 @@ def check_setspace(
     return result
 
 
-def generate_min_capability_setspace_from_priority(
+def generate_min_capability_setspace_by_priority(
     requirement: Optional[Union[SetSpace[T], T]],
     capability: Optional[Union[SetSpace[T], T]],
     priority_list: List[T],
@@ -439,7 +522,7 @@ def generate_min_capability_setspace_from_priority(
         capability = SetSpace[T](items=[capability])
     if requirement is None:
         requirement = capability
-    elif not isinstance(requirement, SetSpace):
+    if not isinstance(requirement, SetSpace):
         requirement = SetSpace[T](items=[requirement])
 
     # Find min capability
@@ -455,6 +538,37 @@ def generate_min_capability_setspace_from_priority(
     )
 
     return min_cap
+
+
+def intersect_setspace_by_priority(
+    requirement: Optional[Union[SetSpace[T], T]],
+    capability: Optional[Union[SetSpace[T], T]],
+    priority_list: List[T],
+) -> Any:
+    # intersect doesn't need to take care about priority.
+    check_result = check_setspace(requirement, capability)
+    if not check_result.result:
+        raise NotMeetRequirementException(
+            "cannot get min value, capability doesn't support requirement"
+        )
+
+    assert capability is not None, "Capability shouldn't be None"
+
+    value = SetSpace[T]()
+    # Ensure that both cap and req are instance of SetSpace
+    if not isinstance(capability, SetSpace):
+        capability = SetSpace[T](items=[capability])
+    if requirement is None:
+        requirement = capability
+    if not isinstance(requirement, SetSpace):
+        requirement = SetSpace[T](items=[requirement])
+
+    # Find min capability
+    for item in requirement:
+        if item in capability:
+            value.add(item)
+
+    return value
 
 
 def count_space_to_int_range(count_space: CountSpace) -> IntRange:
@@ -498,26 +612,30 @@ def check(
     return result
 
 
-def generate_min_capability(
+def _call_requirement_method(
+    method: str,
     requirement: Union[T_SEARCH_SPACE, List[T_SEARCH_SPACE], None],
     capability: Union[T_SEARCH_SPACE, List[T_SEARCH_SPACE], None],
 ) -> Any:
     check_result = check(requirement, capability)
     if not check_result.result:
         raise NotMeetRequirementException(
-            "cannot get min value, capability doesn't support requirement"
+            "cannot call {method}, capability doesn't support requirement"
         )
 
     result: Optional[T_SEARCH_SPACE] = None
     if requirement is None:
         if capability is not None:
             requirement = capability
-    if isinstance(requirement, list):
+    if (
+        isinstance(requirement, list)
+        and method == RequirementMethod.generate_min_capability
+    ):
         result = None
         for req_item in requirement:
             temp_result = req_item.check(capability)
             if temp_result.result:
-                temp_min = req_item.generate_min_capability(capability)
+                temp_min = getattr(req_item, method)(capability)
                 if result is None:
                     result = temp_min
                 else:
@@ -525,9 +643,29 @@ def generate_min_capability(
                     # It can be improved by implement __eq__, __lt__ functions.
                     result = min(result, temp_min)
     elif requirement is not None:
-        result = requirement.generate_min_capability(capability)
+        result = getattr(requirement, method)(capability)
 
     return result
+
+
+def generate_min_capability(
+    requirement: Union[T_SEARCH_SPACE, List[T_SEARCH_SPACE], None],
+    capability: Union[T_SEARCH_SPACE, List[T_SEARCH_SPACE], None],
+) -> Any:
+    return _call_requirement_method(
+        RequirementMethod.generate_min_capability,
+        requirement=requirement,
+        capability=capability,
+    )
+
+
+def intersect(
+    requirement: Union[T_SEARCH_SPACE, List[T_SEARCH_SPACE], None],
+    capability: Union[T_SEARCH_SPACE, List[T_SEARCH_SPACE], None],
+) -> Any:
+    return _call_requirement_method(
+        RequirementMethod.intersect, requirement=requirement, capability=capability
+    )
 
 
 def equal_list(first: Optional[List[Any]], second: Optional[List[Any]]) -> bool:

@@ -608,12 +608,10 @@ class LisaRunner(BaseRunner):
             is_allow_set=True, items=[platform_type]
         )
 
-        platform_requirement_data: Optional[Dict[str, Any]] = None
-        if hasattr(self, "platform"):
-            platform_requirement_data = cast(
-                schema.Platform, self.platform.runbook
-            ).requirement
+        # if platform defined requirement, replace the requirement from
+        # test case.
         for test_result in test_results:
+            platform_requirement = self._create_platform_requirement()
             test_req: TestCaseRequirement = test_result.runtime_data.requirement
 
             # check if there is platform requirement on test case
@@ -626,20 +624,60 @@ class LisaRunner(BaseRunner):
                 assert test_req.environment
 
                 environment_requirement = copy.copy(test_req.environment)
-                # if platform defined requirement, replace the requirement from
-                # test case.
-                if platform_requirement_data:
+                if platform_requirement:
                     for index, node_requirement in enumerate(
                         environment_requirement.nodes
                     ):
                         node_requirement_data: Dict[
                             str, Any
                         ] = node_requirement.to_dict()  # type: ignore
-                        node_requirement_data = deep_update_dict(
-                            platform_requirement_data, node_requirement_data
-                        )
-                        node_requirement = schema.load_by_type(
+
+                        original_node_requirement = schema.load_by_type(
                             schema.NodeSpace, node_requirement_data
+                        )
+
+                        # Manage the union of the platform requirements and the node
+                        # requirements before taking the intersection of
+                        # the rest of the requirements.
+                        platform_requirement.features = search_space.SetSpace(
+                            True,
+                            (
+                                platform_requirement.features.items
+                                if platform_requirement.features
+                                else []
+                            )
+                            + (
+                                original_node_requirement.features.items
+                                if original_node_requirement.features
+                                else []
+                            ),
+                        )
+                        original_node_requirement.excluded_features = (
+                            search_space.SetSpace(
+                                False,
+                                (
+                                    platform_requirement.excluded_features.items
+                                    if platform_requirement.excluded_features
+                                    else []
+                                )
+                                + (
+                                    original_node_requirement.excluded_features.items
+                                    if original_node_requirement.excluded_features
+                                    else []
+                                ),
+                            )
+                        )
+                        platform_requirement.excluded_features = None
+
+                        node_requirement = original_node_requirement.intersect(
+                            platform_requirement
+                        )
+
+                        assert isinstance(platform_requirement.extended_schemas, dict)
+                        assert isinstance(node_requirement.extended_schemas, dict)
+                        node_requirement.extended_schemas = deep_update_dict(
+                            platform_requirement.extended_schemas,
+                            node_requirement.extended_schemas,
                         )
                         environment_requirement.nodes[index] = node_requirement
 
@@ -648,3 +686,27 @@ class LisaRunner(BaseRunner):
                     # if env prepare or deploy failed and the test result is not
                     # run, the failure will attach to this test result.
                     env.source_test_result = test_result
+
+    def _create_platform_requirement(self) -> Optional[schema.NodeSpace]:
+        if not hasattr(self, "platform"):
+            return None
+
+        platform_requirement_data = cast(
+            schema.Platform, self.platform.runbook
+        ).requirement
+        if platform_requirement_data is None:
+            return None
+
+        platform_requirement: schema.NodeSpace = schema.load_by_type(
+            schema.Capability, platform_requirement_data
+        )
+        # fill in required fields as max capability. So it can be
+        # used as a capability in next steps to merge with test requirement.
+        if not platform_requirement.disk:
+            platform_requirement.disk = schema.DiskOptionSettings()
+        if not platform_requirement.network_interface:
+            platform_requirement.network_interface = (
+                schema.NetworkInterfaceOptionSettings()
+            )
+
+        return platform_requirement
